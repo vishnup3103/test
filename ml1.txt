@@ -1,0 +1,341 @@
+#----------------------------------------------------
+## p1 - train.py
+#----------------------------------------------------
+
+import pandas as pd 
+from sklearn.model_selection import train_test_split 
+from sklearn.ensemble import RandomForestClassifier 
+import joblib 
+import json 
+  
+print("Loading Dataset...") 
+  
+df = pd.read_csv("tower_telemetry.csv") 
+print(df.columns.tolist())
+  
+X = df[['temperature_c',
+        'battery_health',
+        'Power_Consumption_W',
+        'signal_drop_rate',
+        'Fan_Speed_RPM',
+        'Humidity_Percent',
+        'Traffic_Load',
+        'Tower_Age_Years']]
+
+y = df['hardware_failure']
+  
+X_train, X_test, y_train, y_test = train_test_split( 
+    X, 
+    y, 
+    test_size=0.25, 
+    random_state=42 
+) 
+  
+print("Training Model...") 
+  
+model = RandomForestClassifier( 
+    n_estimators=100, 
+    random_state=42 
+) 
+  
+model.fit(X_train, y_train) 
+  
+accuracy = model.score(X_test, y_test) 
+print("Accuracy :", accuracy) 
+  
+joblib.dump(model, "telecom_tower_model.pkl") 
+metrics = {"accuracy": accuracy} 
+with open("metrics.json", "w") as f: 
+    json.dump(metrics, f, indent=4) 
+print("Training Completed Successfully") 
+
+#----------------------------------------------------
+## p1 - predict.py
+#----------------------------------------------------
+
+import joblib 
+import pandas as pd
+
+# Load the trained model
+model = joblib.load("telecom_tower_model.pkl")
+
+# Create new input data with the correct column names
+new_data = pd.DataFrame({ 
+    "temperature_c": [55], 
+    "battery_health": [65], 
+    "Power_Consumption_W": [2962], 
+    "signal_drop_rate": [0.5], 
+    "Fan_Speed_RPM": [2838], 
+    "Humidity_Percent": [52], 
+    "Traffic_Load": [2612], 
+    "Tower_Age_Years": [4] 
+})
+
+# Make prediction
+prediction = model.predict(new_data) 
+
+if prediction[0] == 1: 
+    print("Hardware Failure Predicted") 
+else: 
+    print("Tower is Healthy")
+
+
+#----------------------------------------------------
+## p2 - buildspec.yml
+#----------------------------------------------------
+
+version: 0.2 
+phases:
+    install:
+        runtime-versions:
+            python: 3.11
+        commands:
+            - pip install -r requirements.txt
+    build:
+        commands:
+            - python train.py
+            
+artifacts: 
+    files:
+        - model.pkl
+
+#----------------------------------------------------
+## p3 - app.py
+#----------------------------------------------------
+
+from flask import Flask, request, jsonify 
+import pandas as pd 
+import joblib
+
+app = Flask(__name__)
+
+model = joblib.load("telecom_tower_model.pkl")
+
+@app.route("/") 
+def home():
+    return "Telecom Tower Prediction API is Running Successfully!" 
+
+@app.route("/predict", methods=["POST"]) 
+def predict(): 
+    data = request.get_json() 
+    df = pd.DataFrame([data]) 
+    prediction = model.predict(df) 
+    return jsonify({ 
+        "prediction": int(prediction[0]) 
+    })
+
+app.run(debug=True) 
+
+#----------------------------------------------------
+## p3 - json 
+#----------------------------------------------------
+
+{
+  "temperature_c": 55,
+  "battery_health": 65,
+  "Power_Consumption_W": 2962,
+  "signal_drop_rate": 0.5,
+  "Fan_Speed_RPM": 2838,
+  "Humidity_Percent": 52,
+  "Traffic_Load": 2612,
+  "Tower_Age_Years": 4
+}
+
+#----------------------------------------------------
+## p4 - git cmd
+#----------------------------------------------------
+
+git --version    (to see git is installed or not) 
+git init              
+(initialise emty repo hidden .git folder created) 
+git config --global user.name "your username" 
+git config --global user.email "your email" 
+git config --list 
+git status   
+git add . 
+git status 
+git commit -m "First commit" 
+git remote add origin "https://github.com/your username/mlops_lab.git" 
+git remote -v 
+git branch -M main 
+git push -u origin main 
+git add train.py 
+git commit -m "changes" 
+git push
+
+#----------------------------------------------------
+## p5 - monitor_model.py-----------------------------------------------------------------------------------
+#----------------------------------------------------
+
+import os
+import pandas as pd 
+import joblib 
+import mlflow 
+from sklearn.metrics import accuracy_score 
+
+mlflow.set_tracking_uri("sqlite:///mlflow.db")
+
+# 1. Load the trained Random Forest model 
+model = joblib.load("telecom_tower_model.pkl") 
+print("Model loaded successfully!") 
+ 
+# 2. Load NEW production data 
+new_data = pd.read_excel("new_tower_telemetry.xlsx") 
+print("New production data loaded successfully!")
+
+# 3. Select ML features 
+features = [ 
+   "temperature_c",
+    "battery_health",
+    "Power_Consumption_W",
+    "signal_drop_rate",
+    "Fan_Speed_RPM",
+    "Humidity_Percent",
+    "Traffic_Load",
+    "Tower_Age_Years"
+] 
+  
+X_new = new_data[features] 
+y_new = new_data["hardware_failure"] 
+   
+# 4. Make predictions 
+predictions = model.predict(X_new)   
+ 
+# 5. Calculate accuracy 
+accuracy = accuracy_score( y_new, predictions) 
+  
+print("-----------------------------------") 
+print("MODEL DRIFT MONITORING") 
+print("-----------------------------------") 
+print( 
+    "Production Accuracy:", 
+    round(accuracy, 2) 
+) 
+  
+# 6. Start MLflow experiment
+mlflow.set_experiment( 
+    "Telecom_Tower_Model_Monitoring" 
+) 
+  
+with mlflow.start_run(): 
+    mlflow.log_param( 
+        "model", 
+        "Random Forest" 
+    ) 
+    mlflow.log_param( 
+        "n_estimators", 
+        100 
+    ) 
+    mlflow.log_metric( 
+        "production_accuracy", 
+        accuracy 
+    ) 
+    print("Results logged successfully to MLflow") 
+  
+# 7. Drift / performance threshold 
+threshold = 0.80 
+  
+if accuracy < threshold: 
+    print() 
+    print("WARNING: Model performance has degraded!") 
+    print("Model retraining is recommended.") 
+else: 
+    print() 
+    print("Model performance is stable.")
+
+
+
+import pandas as pd
+from evidently import Report
+from evidently.presets import DataDriftPreset
+
+
+# ---------------------------------------
+# p5 - evidently_report.py
+# ---------------------------------------
+
+# 1. Load reference and current data
+reference_data = pd.read_csv("tower_telemetry.csv")
+current_data = pd.read_excel("new_tower_telemetry.xlsx")
+
+print("Reference data loaded successfully!")
+print("Current production data loaded successfully!")
+
+# 2. Select ML features
+features = [
+    "temperature_c",
+    "battery_health",
+    "Power_Consumption_W",
+    "signal_drop_rate",
+    "Fan_Speed_RPM",
+    "Humidity_Percent",
+    "Traffic_Load",
+    "Tower_Age_Years"
+]
+
+reference_data = reference_data[features]
+current_data = current_data[features]
+
+# 3. Create Evidently drift report
+report = Report([
+    DataDriftPreset()
+])
+
+# 4. Run drift detection
+my_eval = report.run(
+    current_data=current_data,
+    reference_data=reference_data
+)
+
+
+# 5. Save HTML report
+my_eval.save_html("data_drift_report.html")
+
+print("-----------------------------------")
+print("DATA DRIFT MONITORING")
+print("-----------------------------------")
+print("Evidently drift report saved as data_drift_report.html")
+
+# ---------------------------------------
+# p5 -report sir
+# ---------------------------------------
+import pandas as pd
+from evidently.report import Report
+from evidently.metric_preset import DataDriftPreset
+
+# Load reference and current data
+reference_data = pd.read_excel("tower_telemetry.xlsx")
+current_data = pd.read_excel("new_tower_telemetry.xlsx")
+
+# Select ML features
+features = [
+    "temperature_c",
+    "battery_health",
+    "Power_Consumption_W",
+    "signal_drop_rate",
+    "Fan_Speed_RPM",
+    "Humidity_Percent",
+    "Traffic_Load",
+    "Tower_Age_Years"
+]
+
+reference_data = reference_data[features]
+current_data = current_data[features]
+
+# Create Evidently drift report
+report = Report(
+    metrics=[
+        DataDriftPreset()
+    ]
+)
+
+# Run drift detection
+report.run(
+    reference_data=reference_data,
+    current_data=current_data
+)
+
+# Save report
+report.save_html("data_drift_report.html")
+
+print("Evidently drift report saved as data_drift_report.html")
